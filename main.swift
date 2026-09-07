@@ -204,11 +204,11 @@ final class SmoothScrollApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func beginIfPermitted() {
-        let listening = CGPreflightListenEventAccess()
         let accessibility = AXIsProcessTrusted()
         let posting = CGPreflightPostEventAccess()
-        NSLog("Permission check: listen=%d accessibility=%d post=%d", listening ? 1 : 0, accessibility ? 1 : 0, posting ? 1 : 0)
-        guard listening && accessibility else {
+        NSLog("Permission check: accessibility=%d post=%d", accessibility ? 1 : 0, posting ? 1 : 0)
+        // Accessibility grants both event listening and posting.
+        guard accessibility else {
             showPermissions()
             return
         }
@@ -221,6 +221,7 @@ final class SmoothScrollApplicationDelegate: NSObject, NSApplicationDelegate {
             showPermissions(failure: "入力処理を開始できませんでした。許可を確認し、必要ならSmoothScrollを起動し直してください。")
             return
         }
+        NSLog("Scroll processing started")
         permissionsWindow?.close()
         permissionsWindow = nil
         settings.initializeLogin()

@@ -7,21 +7,19 @@ struct PermissionsView: View {
     let failure: String?
     let start: () -> Void
     var restart: () -> Void = {}
-    @State private var listening = CGPreflightListenEventAccess()
     @State private var accessibility = AXIsProcessTrusted()
     @State private var posting = CGPreflightPostEventAccess()
-    @State private var requestedPanes: Set<String> = []
+    @State private var requestedAccessibility = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("SmoothScrollを使い始める").font(.title2.bold())
-            Text("ホイール入力を受け取り、滑らかなスクロールに置き換えるために、2つの許可が必要です。")
+            Text("ホイール入力を受け取り、滑らかなスクロールに置き換えるために、アクセシビリティの許可が必要です。")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            permissionRow("入力監視", detail: "ホイールの動きを受け取ります。", granted: listening, pane: "Privacy_ListenEvent")
-            permissionRow("アクセシビリティ", detail: "滑らかなスクロールを送信します。", granted: accessibility, pane: "Privacy_Accessibility")
-            Text(listening && accessibility
-                 ? (posting ? "準備ができました。「開始する」で滑らかなスクロールを有効にできます。" : "2つの許可がそろいました。反映のため、SmoothScrollを一度だけ再起動してください。再起動後は自動で開始します。")
-                 : "未許可の項目からmacOSの設定を開き、SmoothScrollをオンにしてください。この画面に戻ると、状態が自動で更新されます。")
+            accessibilityPermission
+            Text(accessibility
+                 ? (posting ? "準備ができました。「開始する」で滑らかなスクロールを有効にできます。" : "アクセシビリティは許可済みです。反映のため、SmoothScrollを一度だけ再起動してください。再起動後は自動で開始します。")
+                 : "macOSの確認画面から設定を開き、一覧の「SmoothScroll」をオンにしてください。この画面に戻ると、許可の状態が自動で更新されます。確認画面が出ない場合は「設定を開く」を押してください。")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let failure {
                 Text(failure).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
@@ -30,13 +28,13 @@ struct PermissionsView: View {
             HStack {
                 Button("終了") { NSApp.terminate(nil) }
                 Spacer()
-                Button(listening && accessibility && !posting ? "再起動して開始" : "開始する", action: posting ? start : restart)
+                Button(accessibility && !posting ? "再起動して開始" : "開始する", action: posting ? start : restart)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!listening || !accessibility)
+                    .disabled(!accessibility)
             }
             Text("開始するまで、元のスクロール動作を維持します。")
                 .font(.caption).foregroundStyle(.secondary)
-            if !listening || !accessibility {
+            if !accessibility {
                 Button("設定でオンなのに反映されない場合：再起動", action: restart)
                     .font(.caption)
             }
@@ -48,36 +46,29 @@ struct PermissionsView: View {
     }
 
     private func refresh() {
-        listening = CGPreflightListenEventAccess()
         accessibility = AXIsProcessTrusted()
         posting = CGPreflightPostEventAccess()
     }
 
-    private func permissionRow(_ title: String, detail: String, granted: Bool, pane: String) -> some View {
+    private var accessibilityPermission: some View {
         HStack(spacing: 12) {
-            Image(systemName: granted ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(granted ? Color.green : Color.secondary)
+            Image(systemName: accessibility ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(accessibility ? Color.green : Color.secondary)
                 .font(.title2).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.headline)
-                Text(detail).font(.callout).foregroundStyle(.secondary)
-            }
+            Text("アクセシビリティ").font(.headline)
             Spacer()
-            if granted { Text("許可済み").foregroundStyle(.secondary) }
+            if accessibility { Text("許可済み").foregroundStyle(.secondary) }
             else {
-                Button(requestedPanes.contains(pane) ? "設定を開く" : "許可をリクエスト") {
-                    if requestedPanes.insert(pane).inserted {
-                        if pane == "Privacy_ListenEvent" {
-                            _ = CGRequestListenEventAccess()
-                        } else {
-                            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-                            _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
-                        }
+                Button(requestedAccessibility ? "設定を開く" : "許可をリクエスト") {
+                    if !requestedAccessibility {
+                        requestedAccessibility = true
+                        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+                        _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
                         refresh()
-                    } else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+                    } else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
                         NSWorkspace.shared.open(url)
                     }
-                }.accessibilityLabel("\(title)：\(requestedPanes.contains(pane) ? "設定を開く" : "許可をリクエスト")")
+                }.accessibilityLabel("アクセシビリティ：\(requestedAccessibility ? "設定を開く" : "許可をリクエスト")")
             }
         }.padding(14).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
     }

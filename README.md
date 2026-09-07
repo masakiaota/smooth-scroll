@@ -20,7 +20,7 @@
 
 - 動作確認済み：Apple Silicon搭載Mac、macOS 26.6.2
 - ビルドに必要なもの：SwiftコンパイラとmacOS SDKを含むXcode Command Line Tools、またはXcode
-- 利用に必要な権限：入力監視、アクセシビリティ
+- 利用に必要な権限：アクセシビリティ
 
 現在のビルド手順は、ビルドしたMacの環境を対象にします。Intel Macや他のmacOSバージョンでの動作は未検証です。管理された端末では、組織が認める範囲でアプリを導入し、権限を設定してください。
 
@@ -46,7 +46,7 @@ Finderで生成された `SmoothScroll.app` を `/Applications` へ移動また�
 
 ### 3. 権限を許可する
 
-1. 準備画面の「許可をリクエスト」を押し、macOSの案内に従って許可します。
+1. 準備画面の「許可をリクエスト」を押し、macOSの案内からアクセシビリティの設定を開き、一覧の「SmoothScroll」をオンにします。
 2. 確認画面が出ない場合は、同じボタンから「設定を開く」を選び、SmoothScrollをオンにします。
 3. 準備画面に戻り、「開始する」を押します。「再起動して開始」と表示された場合は、そのボタンを押します。
 
@@ -68,7 +68,7 @@ Finderで生成された `SmoothScroll.app` を `/Applications` へ移動また�
 
 準備画面下部の「設定でオンなのに反映されない場合：再起動」を押してください。許可の変更が、アプリの再起動後に反映される場合があります。
 
-両方が許可済みでもイベント送信の反映待ちであれば、「再起動して開始」を使います。macOSから再起動を求められた場合は、その案内に従ってください。
+アクセシビリティが許可済みでもイベント送信の反映待ちであれば、「再起動して開始」を使います。macOSから再起動を求められた場合は、その案内に従ってください。
 
 ### 更新後、再起動しても権限が認識されない
 
@@ -76,7 +76,6 @@ Finderで生成された `SmoothScroll.app` を `/Applications` へ移動また�
 
 ```sh
 tccutil reset Accessibility com.masakiaota.smooth-scroll
-tccutil reset ListenEvent com.masakiaota.smooth-scroll
 open /Applications/SmoothScroll.app
 ```
 
