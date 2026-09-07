@@ -19,12 +19,24 @@ PreviewとPowerPointは初期状態で除外する。アプリ全体が除外対
 Xcode Command Line Toolsが必要。リポジトリのルートで実行する。
 
 ```sh
-make app
+make app SIGN_IDENTITY='Developer ID Application: YOUR NAME (TEAMID)'
 open SmoothScroll.app
 ```
 
-ルートにアドホック署名済みのアプリができる。更新時は、実行中のSmoothScrollをメニューから終了してから構築する。古いコピーを同時に起動しない。
-再署名により権限を再許可する必要が生じる場合がある。その場合はシステム設定で対象のSmoothScrollを確認する。
+ルートに指定した証明書で署名済みのアプリができる。署名指定を省略すると、既存のアプリを変更する前に停止する。更新時は、実行中のSmoothScrollをメニューから終了してから構築する。古いコピーを同時に起動しない。
+更新を通じて同じ署名元とバンドルIDを維持する。証明書がない検証環境でのみ、`make app SIGN_IDENTITY=-` により一時署名を明示できる。一時署名では内容の変更により以前の許可との対応が崩れ、システム設定がオンでも権限が拒否される場合がある。
+
+### 一時署名で権限が一致しなくなった場合
+
+SmoothScrollを終了し、次を実行する。他のアプリの権限やSmoothScrollの設定は変更しない。
+
+```sh
+tccutil reset Accessibility com.masakiaota.smooth-scroll
+tccutil reset ListenEvent com.masakiaota.smooth-scroll
+open /Applications/SmoothScroll.app
+```
+
+準備画面から両方の許可を要求し、macOS側で許可する。復旧確認までは再ビルドや再署名をしない。一時署名から証明書による署名へ移行するときも、再許可が必要になる場合がある。
 
 ### 証明書を持つMacで署名する
 
