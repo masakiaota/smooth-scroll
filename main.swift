@@ -201,8 +201,17 @@ final class SmoothScrollApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func beginIfPermitted() {
-        guard CGPreflightListenEventAccess() && CGPreflightPostEventAccess() && AXIsProcessTrusted() else {
+        let listening = CGPreflightListenEventAccess()
+        let accessibility = AXIsProcessTrusted()
+        let posting = CGPreflightPostEventAccess()
+        NSLog("Permission check: listen=%d accessibility=%d post=%d", listening ? 1 : 0, accessibility ? 1 : 0, posting ? 1 : 0)
+        guard listening && accessibility else {
             showPermissions()
+            return
+        }
+        // The AX prompt is asynchronous; request posting only after AX approval.
+        guard posting || CGRequestPostEventAccess() else {
+            showPermissions(failure: "アクセシビリティは許可済みですが、イベント送信をまだ利用できません。macOSの確認画面に従い、再度「開始する」を押してください。反映されない場合は、権限をオンのままアプリを終了して起動し直してください。")
             return
         }
         guard startSmoothing() else {

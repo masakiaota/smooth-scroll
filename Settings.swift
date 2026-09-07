@@ -7,7 +7,7 @@ struct PermissionsView: View {
     let failure: String?
     let start: () -> Void
     @State private var listening = CGPreflightListenEventAccess()
-    @State private var accessibility = AXIsProcessTrusted() && CGPreflightPostEventAccess()
+    @State private var accessibility = AXIsProcessTrusted()
     @State private var requestedPanes: Set<String> = []
 
     var body: some View {
@@ -42,7 +42,7 @@ struct PermissionsView: View {
 
     private func refresh() {
         listening = CGPreflightListenEventAccess()
-        accessibility = AXIsProcessTrusted() && CGPreflightPostEventAccess()
+        accessibility = AXIsProcessTrusted()
     }
 
     private func permissionRow(_ title: String, detail: String, granted: Bool, pane: String) -> some View {
@@ -63,8 +63,7 @@ struct PermissionsView: View {
                             _ = CGRequestListenEventAccess()
                         } else {
                             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-                            let trusted = AXIsProcessTrustedWithOptions(options as CFDictionary)
-                            if trusted && !CGPreflightPostEventAccess() { _ = CGRequestPostEventAccess() }
+                            _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
                         }
                         refresh()
                     } else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
