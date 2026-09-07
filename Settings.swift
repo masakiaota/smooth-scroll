@@ -8,6 +8,7 @@ struct PermissionsView: View {
     let start: () -> Void
     @State private var listening = CGPreflightListenEventAccess()
     @State private var accessibility = AXIsProcessTrusted() && CGPreflightPostEventAccess()
+    @State private var requestedPanes: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -16,11 +17,8 @@ struct PermissionsView: View {
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             permissionRow("入力監視", detail: "ホイールの動きを受け取ります。", granted: listening, pane: "Privacy_ListenEvent")
             permissionRow("アクセシビリティ", detail: "滑らかなスクロールを送信します。", granted: accessibility, pane: "Privacy_Accessibility")
-            Text("システム設定でSmoothScrollをオンにしてください。一覧にない場合は「＋」からこのアプリを追加できます。更新後に許可が反映されない場合は、古い登録を削除して追加し直してください。")
+            Text("各「許可をリクエスト」を押し、macOSの案内に従ってSmoothScrollを許可してください。確認画面が出ない場合は、同じボタンからシステム設定を開けます。")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Button("このアプリをFinderで表示") {
-                NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
-            }
             if let failure {
                 Text(failure).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
@@ -59,13 +57,20 @@ struct PermissionsView: View {
             Spacer()
             if granted { Text("許可済み").foregroundStyle(.secondary) }
             else {
-                Button("設定を開く") {
-                    if pane == "Privacy_ListenEvent" { _ = CGRequestListenEventAccess() }
-                    else { _ = CGRequestPostEventAccess() }
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+                Button(requestedPanes.contains(pane) ? "設定を開く" : "許可をリクエスト") {
+                    if requestedPanes.insert(pane).inserted {
+                        if pane == "Privacy_ListenEvent" {
+                            _ = CGRequestListenEventAccess()
+                        } else {
+                            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+                            let trusted = AXIsProcessTrustedWithOptions(options as CFDictionary)
+                            if trusted && !CGPreflightPostEventAccess() { _ = CGRequestPostEventAccess() }
+                        }
+                        refresh()
+                    } else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
                         NSWorkspace.shared.open(url)
                     }
-                }.accessibilityLabel("\(title)の設定を開く")
+                }.accessibilityLabel("\(title)：\(requestedPanes.contains(pane) ? "設定を開く" : "許可をリクエスト")")
             }
         }.padding(14).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
     }
