@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360" viewBox="0 0 480 360">
+  <rect width="480" height="360" fill="#f5f5f3"/>
+  <defs>
+    <g id="symbol" fill="none" stroke="currentColor" stroke-linecap="round">
+      <rect x="77" y="44" width="46" height="112" rx="23" stroke-width="12"/>
+      <path d="M51 63V116M149 84V137" stroke-width="10" opacity="0.4"/>
+    </g>
+  </defs>
+  <rect x="140" y="36" width="200" height="200" rx="44" fill="#285bce"/>
+  <use href="#symbol" x="140" y="36" color="white"/>
+  <use href="#symbol" transform="translate(226 285) scale(.14)" color="#252b33"/>
+</svg>
