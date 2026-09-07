@@ -72,6 +72,12 @@ final class AppState {
             return Unmanaged.passUnretained(event)
         }
 
+        // Never consume physical input if synthetic output is not permitted.
+        guard CGPreflightPostEventAccess() && AXIsProcessTrusted() else {
+            reset()
+            return Unmanaged.passUnretained(event)
+        }
+
         let app = target(at: event.location)
         if targetPID != app?.processIdentifier { reset() }
         guard accepts(app) else {
@@ -96,7 +102,9 @@ final class AppState {
 
     func emitNext() {
         guard let targetPID else { return }
-        let app = CGEvent(source: nil).flatMap { target(at: $0.location) }
+        guard CGPreflightPostEventAccess() && AXIsProcessTrusted(),
+              let pointer = CGEvent(source: nil) else { reset(); return }
+        let app = target(at: pointer.location)
         guard app?.processIdentifier == targetPID, accepts(app) else { reset(); return }
         let verticalStep = verticalSmoother.next()
         let horizontalStep = horizontalSmoother.next()
@@ -115,7 +123,9 @@ final class AppState {
         event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: horizontalStep)
         event.setIntegerValueField(.eventSourceUserData, value: syntheticMarker)
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
-        event.postToPid(targetPID)
+        event.location = pointer.location
+        // Use the system routing that worked in the original MVP.
+        event.post(tap: .cghidEventTap)
         if verticalSmoother.remaining == 0 && horizontalSmoother.remaining == 0 { reset() }
     }
 }
@@ -176,6 +186,7 @@ final class SmoothScrollApplicationDelegate: NSObject, NSApplicationDelegate {
     private lazy var state = AppState(settings: settings)
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
+    private var permissionsWindow: NSWindow?
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private var timer: Timer?
@@ -186,11 +197,20 @@ final class SmoothScrollApplicationDelegate: NSObject, NSApplicationDelegate {
             return
         }
         installStatusMenu()
-        guard requestPermissions(), startSmoothing() else {
-            showFailure()
-            NSApp.terminate(nil)
+        beginIfPermitted()
+    }
+
+    private func beginIfPermitted() {
+        guard CGPreflightListenEventAccess() && CGPreflightPostEventAccess() && AXIsProcessTrusted() else {
+            showPermissions()
             return
         }
+        guard startSmoothing() else {
+            showPermissions(failure: "入力処理を開始できませんでした。許可を確認し、必要ならSmoothScrollを起動し直してください。")
+            return
+        }
+        permissionsWindow?.close()
+        permissionsWindow = nil
         settings.initializeLogin()
         if !settings.loginMessage.isEmpty { showSettings() }
     }
@@ -200,12 +220,6 @@ final class SmoothScrollApplicationDelegate: NSObject, NSApplicationDelegate {
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
-    }
-
-    private func requestPermissions() -> Bool {
-        let canListen = CGPreflightListenEventAccess() || CGRequestListenEventAccess()
-        let canPost = CGPreflightPostEventAccess() || CGRequestPostEventAccess()
-        return canListen && canPost
     }
 
     private func startSmoothing() -> Bool {
@@ -252,6 +266,7 @@ final class SmoothScrollApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showSettings() {
+        if tap == nil { showPermissions(); return }
         settings.refreshLogin()
         if settingsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 528, height: 478), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
@@ -265,13 +280,19 @@ final class SmoothScrollApplicationDelegate: NSObject, NSApplicationDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
-    private func showFailure() {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "SmoothScrollを開始できない"
-        alert.informativeText = "システム設定の「プライバシーとセキュリティ」で、入力監視とアクセシビリティを許可してから、アプリを起動し直してください。"
+    private func showPermissions(failure: String? = nil) {
+        if permissionsWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 528, height: 520), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.title = "SmoothScrollの準備"
+            window.isReleasedWhenClosed = false
+            window.center()
+            permissionsWindow = window
+        }
+        let content = NSHostingView(rootView: PermissionsView(failure: failure, start: { [weak self] in self?.beginIfPermitted() }))
+        permissionsWindow?.contentView = content
+        permissionsWindow?.setContentSize(content.fittingSize)
         NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
+        permissionsWindow?.makeKeyAndOrderFront(nil)
     }
 }
 
@@ -285,7 +306,7 @@ func runApplication() {
 
 if Array(CommandLine.arguments.dropFirst()) == ["--self-test"] {
     runSelfTest()
-} else if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--preview-settings" {
+} else if CommandLine.arguments.count == 3 && ["--preview-settings", "--preview-permissions"].contains(CommandLine.arguments[1]) {
     // Render without event interception or login-item registration.
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
@@ -293,9 +314,13 @@ if Array(CommandLine.arguments.dropFirst()) == ["--self-test"] {
     let defaults = UserDefaults(suiteName: suite)!
     let settings = Settings(defaults: defaults)
     settings.loginEnabled = true
-    let view = NSHostingView(rootView: SettingsView(settings: settings))
+    let preview = CommandLine.arguments[1] == "--preview-permissions"
+        ? AnyView(PermissionsView(failure: nil, start: {}))
+        : AnyView(SettingsView(settings: settings))
+    let view = NSHostingView(rootView: preview)
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 528, height: 478), styleMask: [.titled], backing: .buffered, defer: false)
     window.contentView = view
+    window.setContentSize(view.fittingSize)
     window.display()
     RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
     view.layoutSubtreeIfNeeded()

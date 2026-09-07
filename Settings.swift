@@ -3,6 +3,74 @@ import SwiftUI
 import ServiceManagement
 import UniformTypeIdentifiers
 
+struct PermissionsView: View {
+    let failure: String?
+    let start: () -> Void
+    @State private var listening = CGPreflightListenEventAccess()
+    @State private var accessibility = AXIsProcessTrusted() && CGPreflightPostEventAccess()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("SmoothScrollを使い始める").font(.title2.bold())
+            Text("ホイール入力を受け取り、滑らかなスクロールに置き換えるために、2つの許可が必要です。")
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            permissionRow("入力監視", detail: "ホイールの動きを受け取ります。", granted: listening, pane: "Privacy_ListenEvent")
+            permissionRow("アクセシビリティ", detail: "滑らかなスクロールを送信します。", granted: accessibility, pane: "Privacy_Accessibility")
+            Text("システム設定でSmoothScrollをオンにしてください。一覧にない場合は「＋」からこのアプリを追加できます。更新後に許可が反映されない場合は、古い登録を削除して追加し直してください。")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Button("このアプリをFinderで表示") {
+                NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+            }
+            if let failure {
+                Text(failure).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            }
+            Divider()
+            HStack {
+                Button("終了") { NSApp.terminate(nil) }
+                Spacer()
+                Button("状態を再確認", action: refresh)
+                Button("開始する", action: start)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!listening || !accessibility)
+            }
+            Text("開始するまで、元のスクロール動作を維持します。")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(24).frame(width: 480)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in refresh() }
+    }
+
+    private func refresh() {
+        listening = CGPreflightListenEventAccess()
+        accessibility = AXIsProcessTrusted() && CGPreflightPostEventAccess()
+    }
+
+    private func permissionRow(_ title: String, detail: String, granted: Bool, pane: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: granted ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(granted ? Color.green : Color.secondary)
+                .font(.title2).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline)
+                Text(detail).font(.callout).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if granted { Text("許可済み").foregroundStyle(.secondary) }
+            else {
+                Button("設定を開く") {
+                    if pane == "Privacy_ListenEvent" { _ = CGRequestListenEventAccess() }
+                    else { _ = CGRequestPostEventAccess() }
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }.accessibilityLabel("\(title)の設定を開く")
+            }
+        }.padding(14).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
 final class Settings: ObservableObject {
     private let defaults: UserDefaults
     @Published var excluded: [String] {
