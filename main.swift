@@ -123,7 +123,6 @@ final class AppState {
         event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: horizontalStep)
         event.setIntegerValueField(.eventSourceUserData, value: syntheticMarker)
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
-        event.location = pointer.location
         // Use the system routing that worked in the original MVP.
         event.post(tap: .cghidEventTap)
         if verticalSmoother.remaining == 0 && horizontalSmoother.remaining == 0 { reset() }
@@ -297,11 +296,24 @@ final class SmoothScrollApplicationDelegate: NSObject, NSApplicationDelegate {
             window.center()
             permissionsWindow = window
         }
-        let content = NSHostingView(rootView: PermissionsView(failure: failure, start: { [weak self] in self?.beginIfPermitted() }))
+        let content = NSHostingView(rootView: PermissionsView(failure: failure, start: { [weak self] in self?.beginIfPermitted() }, restart: { [weak self] in self?.restartApplication() }))
         permissionsWindow?.contentView = content
         permissionsWindow?.setContentSize(content.fittingSize)
         NSApp.activate(ignoringOtherApps: true)
         permissionsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    private func restartApplication() {
+        // Wait for this process to exit before Launch Services opens the same bundle.
+        let helper = Process()
+        helper.executableURL = URL(fileURLWithPath: "/bin/sh")
+        helper.arguments = ["-c", "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.1; done; exec /usr/bin/open \"$2\"", "SmoothScroll-relaunch", String(ProcessInfo.processInfo.processIdentifier), Bundle.main.bundlePath]
+        do {
+            try helper.run()
+            NSApp.terminate(nil)
+        } catch {
+            showPermissions(failure: "再起動できませんでした。SmoothScrollを終了し、アプリケーションフォルダから開いてください。")
+        }
     }
 }
 

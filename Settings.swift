@@ -6,8 +6,10 @@ import UniformTypeIdentifiers
 struct PermissionsView: View {
     let failure: String?
     let start: () -> Void
+    var restart: () -> Void = {}
     @State private var listening = CGPreflightListenEventAccess()
     @State private var accessibility = AXIsProcessTrusted()
+    @State private var posting = CGPreflightPostEventAccess()
     @State private var requestedPanes: Set<String> = []
 
     var body: some View {
@@ -17,7 +19,9 @@ struct PermissionsView: View {
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             permissionRow("入力監視", detail: "ホイールの動きを受け取ります。", granted: listening, pane: "Privacy_ListenEvent")
             permissionRow("アクセシビリティ", detail: "滑らかなスクロールを送信します。", granted: accessibility, pane: "Privacy_Accessibility")
-            Text("各「許可をリクエスト」を押し、macOSの案内に従ってSmoothScrollを許可してください。確認画面が出ない場合は、同じボタンからシステム設定を開けます。")
+            Text(listening && accessibility
+                 ? (posting ? "準備ができました。「開始する」で滑らかなスクロールを有効にできます。" : "2つの許可がそろいました。反映のため、SmoothScrollを一度だけ再起動してください。再起動後は自動で開始します。")
+                 : "未許可の項目からmacOSの設定を開き、SmoothScrollをオンにしてください。この画面に戻ると、状態が自動で更新されます。")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let failure {
                 Text(failure).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
@@ -26,13 +30,16 @@ struct PermissionsView: View {
             HStack {
                 Button("終了") { NSApp.terminate(nil) }
                 Spacer()
-                Button("状態を再確認", action: refresh)
-                Button("開始する", action: start)
+                Button(listening && accessibility && !posting ? "再起動して開始" : "開始する", action: posting ? start : restart)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!listening || !accessibility)
             }
             Text("開始するまで、元のスクロール動作を維持します。")
                 .font(.caption).foregroundStyle(.secondary)
+            if !listening || !accessibility {
+                Button("設定でオンなのに反映されない場合：再起動", action: restart)
+                    .font(.caption)
+            }
         }
         .padding(24).frame(width: 480)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -43,6 +50,7 @@ struct PermissionsView: View {
     private func refresh() {
         listening = CGPreflightListenEventAccess()
         accessibility = AXIsProcessTrusted()
+        posting = CGPreflightPostEventAccess()
     }
 
     private func permissionRow(_ title: String, detail: String, granted: Bool, pane: String) -> some View {
