@@ -3,3 +3,14 @@
 *.app/
 smooth-scroll
 smooth-scroll.test
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.key
+*.pem
+*.cer
+*.mobileprovision
+*.provisionprofile
+*.dSYM/
