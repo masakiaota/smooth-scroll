@@ -4,31 +4,28 @@ import Foundation
 import SwiftUI
 
 struct Smoother {
-    private(set) var remaining = 0.0
-    private let decay = 0.18
-    private let maxStep = 48.0
-    private let maxBacklog = 540.0
-    private let stopThreshold = 0.01
+    // Sixteen ticks at 120 Hz: about 133 ms. Delayed timer ticks can extend this.
+    private var scheduled = Array(repeating: 0.0, count: 16)
+    private let decay = 0.35
+    var remaining: Double { scheduled.reduce(0, +) }
 
     mutating func add(_ delta: Int64) {
         guard delta != 0 else { return }
-        let bounded = min(max(Double(delta), -maxBacklog), maxBacklog)
-        if remaining != 0 && (remaining > 0) != (bounded > 0) {
-            remaining = bounded
-        } else {
-            // ponytail: Bound the tail; raise maxBacklog if fast scrolling feels too short.
-            remaining = min(max(remaining + bounded, -maxBacklog), maxBacklog)
+        // Normalize the decay curve so each input is fully emitted in sixteen ticks.
+        let normalization = 1 - pow(1 - decay, Double(scheduled.count))
+        var undistributed = Double(delta)
+        for index in scheduled.indices {
+            let step = index == scheduled.count - 1
+                ? undistributed
+                : Double(delta) * decay * pow(1 - decay, Double(index)) / normalization
+            scheduled[index] += step
+            undistributed -= step
         }
     }
 
     mutating func next() -> Double {
-        guard abs(remaining) >= stopThreshold else {
-            remaining = 0
-            return 0
-        }
-        let magnitude = min(maxStep, abs(remaining) * decay)
-        let step = remaining > 0 ? magnitude : -magnitude
-        remaining -= step
+        let step = scheduled.removeFirst()
+        scheduled.append(0)
         return step
     }
 }
@@ -113,8 +110,8 @@ final class AppState {
                   scrollWheelEvent2Source: nil,
                   units: .pixel,
                   wheelCount: 2,
-                  wheel1: Int32(verticalStep.rounded(.towardZero)),
-                  wheel2: Int32(horizontalStep.rounded(.towardZero)),
+                  wheel1: Int32(max(Double(Int32.min), min(Double(Int32.max), verticalStep.rounded(.towardZero)))),
+                  wheel2: Int32(max(Double(Int32.min), min(Double(Int32.max), horizontalStep.rounded(.towardZero)))),
                   wheel3: 0
               ) else { return }
         event.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: verticalStep)
@@ -134,7 +131,7 @@ func runSelfTest() {
     smoother.add(13)
     var total = smoother.next()
     var parts = 1
-    precondition(total > 2 && total < 3)
+    precondition(total > 4.55 && total < 4.57)
     while true {
         let step = smoother.next()
         if step == 0 { break }
@@ -142,12 +139,19 @@ func runSelfTest() {
         parts += 1
         precondition(parts < 1000)
     }
-    precondition(abs(total - 13) < 0.01 && parts > 1)
+    precondition(abs(total - 13) < 1e-9 && parts == 16)
 
-    smoother.add(100)
-    precondition(smoother.next() > 0)
-    smoother.add(-13)
-    precondition(smoother.next() < 0)
+    // Overlapping inputs, including reversal, preserve their signed total.
+    total = 0
+    var inputTotal = 0.0
+    for delta: Int64 in [10000, 20000, -5000, 1, -13] {
+        smoother.add(delta)
+        inputTotal += Double(delta)
+        total += smoother.next()
+    }
+    for _ in 0..<16 { total += smoother.next() }
+    precondition(abs(total - inputTotal) < 1e-8 && smoother.remaining == 0)
+    precondition(smoother.next() == 0)
     let suite = "SmoothScroll.tests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
     defer { defaults.removePersistentDomain(forName: suite) }
