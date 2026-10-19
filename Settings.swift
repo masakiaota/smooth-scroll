@@ -7,6 +7,7 @@ struct PermissionsView: View {
     let failure: String?
     let start: () -> Void
     var restart: () -> Void = {}
+    var quit: () -> Void = { NSApp.terminate(nil) }
     @State private var accessibility = AXIsProcessTrusted()
     @State private var posting = CGPreflightPostEventAccess()
     @State private var requestedAccessibility = false
@@ -26,7 +27,7 @@ struct PermissionsView: View {
             }
             Divider()
             HStack {
-                Button("終了") { NSApp.terminate(nil) }
+                Button("終了", action: quit)
                 Spacer()
                 Button(accessibility && !posting ? "再起動して開始" : "開始する", action: posting ? start : restart)
                     .keyboardShortcut(.defaultAction)
@@ -76,15 +77,47 @@ struct PermissionsView: View {
 
 final class Settings: ObservableObject {
     private let defaults: UserDefaults
+    private let synchronizesAcrossProcesses: Bool
+    private var observer: NSObjectProtocol?
+    private var isReloadingExcluded = false
+    private static let changed = Notification.Name("com.masakiaota.smooth-scroll.excludedAppsChanged")
     @Published var excluded: [String] {
-        didSet { defaults.set(excluded, forKey: "excludedApps") }
+        didSet {
+            guard !isReloadingExcluded, excluded != oldValue else { return }
+            defaults.set(excluded, forKey: "excludedApps")
+            if synchronizesAcrossProcesses {
+                // Flush before notifying the resident process or exiting the UI.
+                defaults.synchronize()
+                DistributedNotificationCenter.default().postNotificationName(Self.changed, object: nil, userInfo: nil, deliverImmediately: true)
+            }
+        }
     }
     @Published var loginEnabled = false
     @Published var loginMessage = ""
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, synchronizesAcrossProcesses: Bool = false) {
         self.defaults = defaults
+        self.synchronizesAcrossProcesses = synchronizesAcrossProcesses
         excluded = defaults.stringArray(forKey: "excludedApps") ?? ["com.apple.Preview", "com.microsoft.Powerpoint"]
+        if synchronizesAcrossProcesses {
+            observer = DistributedNotificationCenter.default().addObserver(forName: Self.changed, object: nil, queue: .main) { [weak self] _ in
+                self?.reloadExcluded()
+            }
+        }
+    }
+
+    deinit {
+        if let observer { DistributedNotificationCenter.default().removeObserver(observer) }
+    }
+
+    func reloadExcluded() {
+        defaults.synchronize()
+        let stored = defaults.stringArray(forKey: "excludedApps") ?? ["com.apple.Preview", "com.microsoft.Powerpoint"]
+        guard excluded != stored else { return }
+        // A received snapshot must not overwrite a newer edit in shared defaults.
+        isReloadingExcluded = true
+        defer { isReloadingExcluded = false }
+        excluded = stored
     }
 
     func initializeLogin() {

@@ -36,6 +36,7 @@ final class AppState {
     let settings: Settings
     var tap: CFMachPort?
     private var targetPID: pid_t?
+    var interfacePID: pid_t?
     init(settings: Settings) { self.settings = settings }
     var verticalSmoother = Smoother()
     var horizontalSmoother = Smoother()
@@ -48,20 +49,25 @@ final class AppState {
 
     // Window bounds and CGEvent locations both use global display coordinates.
     func target(at point: CGPoint) -> NSRunningApplication? {
-        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-        for window in windows {
-            guard let layer = window[kCGWindowLayer as String] as? Int, layer == 0,
-                  let bounds = window[kCGWindowBounds as String] as? NSDictionary,
-                  let rect = CGRect(dictionaryRepresentation: bounds), rect.contains(point),
-                  let pid = window[kCGWindowOwnerPID as String] as? Int32 else { continue }
-            return NSRunningApplication(processIdentifier: pid)
+        // This runs up to 120 times a second. Do not retain bridged window
+        // dictionaries until AppKit next drains its event-loop pool.
+        autoreleasepool {
+            let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+            for window in windows {
+                guard let layer = window[kCGWindowLayer as String] as? Int, layer == 0,
+                      let bounds = window[kCGWindowBounds as String] as? NSDictionary,
+                      let rect = CGRect(dictionaryRepresentation: bounds), rect.contains(point),
+                      let pid = window[kCGWindowOwnerPID as String] as? Int32 else { continue }
+                return NSRunningApplication(processIdentifier: pid)
+            }
+            return nil
         }
-        return nil
     }
 
     func accepts(_ app: NSRunningApplication?) -> Bool {
         guard let app, let id = app.bundleIdentifier else { return false }
-        return app.processIdentifier != ProcessInfo.processInfo.processIdentifier && !settings.excluded.contains(id)
+        return app.processIdentifier != ProcessInfo.processInfo.processIdentifier
+            && app.processIdentifier != interfacePID && !settings.excluded.contains(id)
     }
 
     func handle(_ event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -185,11 +191,10 @@ let callback: CGEventTapCallBack = { _, type, event, userInfo in
 }
 
 final class SmoothScrollApplicationDelegate: NSObject, NSApplicationDelegate {
-    private let settings = Settings()
+    private let settings = Settings(synchronizesAcrossProcesses: true)
     private lazy var state = AppState(settings: settings)
     private var statusItem: NSStatusItem?
-    private var settingsWindow: NSWindow?
-    private var permissionsWindow: NSWindow?
+    private var interface: Process?
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private var timer: Timer?
@@ -222,13 +227,13 @@ final class SmoothScrollApplicationDelegate: NSObject, NSApplicationDelegate {
             return
         }
         NSLog("Scroll processing started")
-        permissionsWindow?.close()
-        permissionsWindow = nil
         settings.initializeLogin()
         if !settings.loginMessage.isEmpty { showSettings() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        interface?.terminationHandler = nil
+        if let interface, interface.isRunning { interface.terminate() }
         timer?.invalidate()
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: false)
@@ -236,6 +241,7 @@ final class SmoothScrollApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startSmoothing() -> Bool {
+        if tap != nil { return true }
         let mask = CGEventMask(1) << CGEventType.scrollWheel.rawValue
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -280,32 +286,48 @@ final class SmoothScrollApplicationDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showSettings() {
         if tap == nil { showPermissions(); return }
-        settings.refreshLogin()
-        if settingsWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 528, height: 478), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-            window.title = "SmoothScroll 設定"
-            window.contentView = NSHostingView(rootView: SettingsView(settings: settings))
-            window.isReleasedWhenClosed = false
-            window.center()
-            settingsWindow = window
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        settingsWindow?.makeKeyAndOrderFront(nil)
+        showInterface(mode: "settings")
     }
 
     private func showPermissions(failure: String? = nil) {
-        if permissionsWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 528, height: 520), styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            window.title = "SmoothScrollの準備"
-            window.isReleasedWhenClosed = false
-            window.center()
-            permissionsWindow = window
+        showInterface(mode: "permissions", failure: failure)
+    }
+
+    private func showInterface(mode: String, failure: String? = nil) {
+        if let interface, interface.isRunning {
+            InterfaceDelegate.requestShow(processIdentifier: interface.processIdentifier)
+            return
         }
-        let content = NSHostingView(rootView: PermissionsView(failure: failure, start: { [weak self] in self?.beginIfPermitted() }, restart: { [weak self] in self?.restartApplication() }))
-        permissionsWindow?.contentView = content
-        permissionsWindow?.setContentSize(content.fittingSize)
-        NSApp.activate(ignoringOtherApps: true)
-        permissionsWindow?.makeKeyAndOrderFront(nil)
+        let process = Process()
+        process.executableURL = Bundle.main.executableURL
+        process.arguments = ["--interface", mode, String(getpid())] + (failure.map { [$0] } ?? [])
+        process.terminationHandler = { [weak self] process in
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.interface === process else { return }
+                self.interface = nil
+                self.state.interfacePID = nil
+                self.settings.reloadExcluded()
+                guard process.terminationReason == .exit else { return }
+                switch InterfaceResult(rawValue: process.terminationStatus) {
+                // A newly granted permission can remain cached in this process.
+                // Start again with fresh permission state after the UI succeeds.
+                case .ready, .restart: self.restartApplication()
+                case .quit: NSApp.terminate(nil)
+                default: break
+                }
+            }
+        }
+        do {
+            try process.run()
+            interface = process
+            state.interfacePID = process.processIdentifier
+        } catch {
+            // Keep an actionable error if the UI process cannot be launched.
+            let alert = NSAlert()
+            alert.messageText = "画面を開けませんでした"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
     }
 
     private func restartApplication() {
@@ -323,14 +345,25 @@ final class SmoothScrollApplicationDelegate: NSObject, NSApplicationDelegate {
 }
 
 func runApplication() {
-    let app = NSApplication.shared
-    let delegate = SmoothScrollApplicationDelegate()
-    app.setActivationPolicy(.accessory)
-    app.delegate = delegate
-    withExtendedLifetime(delegate) { app.run() }
+    // Drain launch-time temporary objects before entering the long-lived run loop.
+    let delegate = autoreleasepool {
+        let app = NSApplication.shared
+        let delegate = SmoothScrollApplicationDelegate()
+        app.setActivationPolicy(.accessory)
+        app.delegate = delegate
+        return delegate
+    }
+    withExtendedLifetime(delegate) { NSApplication.shared.run() }
 }
 
-if Array(CommandLine.arguments.dropFirst()) == ["--self-test"] {
+if CommandLine.arguments.dropFirst().first == "--interface" {
+    // A helper whose parent has already exited must never become a resident.
+    guard (4...5).contains(CommandLine.arguments.count),
+          ["settings", "permissions"].contains(CommandLine.arguments[2]),
+          let parentPID = Int32(CommandLine.arguments[3]), parentPID > 1,
+          parentPID == getppid() else { exit(InterfaceResult.closed.rawValue) }
+    runInterface(mode: CommandLine.arguments[2], failure: CommandLine.arguments.count == 5 ? CommandLine.arguments[4] : nil, parentPID: parentPID)
+} else if Array(CommandLine.arguments.dropFirst()) == ["--self-test"] {
     runSelfTest()
 } else if CommandLine.arguments.count == 3 && ["--preview-settings", "--preview-permissions"].contains(CommandLine.arguments[1]) {
     // Render without event interception or login-item registration.

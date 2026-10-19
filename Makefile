@@ -1,9 +1,10 @@
 APP := SmoothScroll.app
-SOURCES := main.swift Settings.swift
+SOURCES := main.swift Settings.swift Interface.swift
+SWIFTFLAGS ?= -O -whole-module-optimization
 SIGN_IDENTITY ?=
 SIGN_OPTIONS = $(if $(filter -,$(SIGN_IDENTITY)),,--options runtime --timestamp)
 
-.PHONY: app test check-signing
+.PHONY: app test test-interface check-signing
 
 app: check-signing
 	$(MAKE) test
@@ -12,7 +13,7 @@ app: check-signing
 	iconutil -c icns .build/AppIcon.iconset -o "$(APP)/Contents/Resources/AppIcon.icns"
 	cp .build/MenuIcon*.png "$(APP)/Contents/Resources/"
 	cp Info.plist "$(APP)/Contents/Info.plist"
-	swiftc $(SOURCES) -o .build/SmoothScroll
+	swiftc $(SWIFTFLAGS) $(SOURCES) -o .build/SmoothScroll
 	cp .build/SmoothScroll "$(APP)/Contents/MacOS/SmoothScroll"
 	codesign --force --sign "$(SIGN_IDENTITY)" $(SIGN_OPTIONS) "$(APP)"
 	codesign --verify --strict "$(APP)"
@@ -24,3 +25,10 @@ test:
 	mkdir -p .build
 	swiftc $(SOURCES) -o .build/SmoothScroll-test
 	.build/SmoothScroll-test --self-test
+	swiftc $(SWIFTFLAGS) $(SOURCES) -o .build/SmoothScroll-test-release
+	.build/SmoothScroll-test-release --self-test
+
+test-interface: test
+	mkdir -p .build
+	swiftc $(SWIFTFLAGS) Settings.swift Interface.swift scripts/InterfaceTests.swift -o .build/InterfaceTests
+	.build/InterfaceTests
