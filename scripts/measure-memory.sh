@@ -12,7 +12,7 @@ for mode in retained isolated; do
         benchmark_pid=$!
         # A bounded wait; the benchmark checks its helper has exited first.
         attempt=0
-        until rg -q '^ready:' "$report.log"; do
+        until grep -q '^ready:' "$report.log"; do
             kill -0 "$benchmark_pid"
             attempt=$((attempt + 1))
             [ "$attempt" -lt 100 ] || exit 1
@@ -20,7 +20,7 @@ for mode in retained isolated; do
         done
         vmmap -summary "$benchmark_pid" > "$report.txt"
         printf '%s run %s: ' "$mode" "$run"
-        rg '^Physical footprint:' "$report.txt"
+        grep '^Physical footprint:' "$report.txt"
         wait "$benchmark_pid"
         benchmark_pid=
     done

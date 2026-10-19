@@ -16,7 +16,17 @@ final class InterfaceDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
     private let failure: String?
     private let parentPID: pid_t
     private var parentMonitor: DispatchSourceProcess?
+    private var showObserver: NSObjectProtocol?
     private var window: NSWindow?
+    private static let showNotification = Notification.Name("com.masakiaota.smooth-scroll.showInterface")
+
+    static func requestShow(processIdentifier: pid_t) {
+        DistributedNotificationCenter.default().postNotificationName(showNotification, object: String(processIdentifier), userInfo: nil, deliverImmediately: true)
+    }
+
+    deinit {
+        if let showObserver { DistributedNotificationCenter.default().removeObserver(showObserver) }
+    }
 
     init(mode: String, failure: String?, parentPID: pid_t, settings: Settings = Settings(synchronizesAcrossProcesses: true)) {
         self.settings = settings
@@ -37,6 +47,9 @@ final class InterfaceDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         window.isReleasedWhenClosed = false
         window.delegate = self
         self.window = window
+        showObserver = DistributedNotificationCenter.default().addObserver(forName: Self.showNotification, object: String(getpid()), queue: .main) { [weak self] _ in
+            self?.showWindow()
+        }
         if mode == "settings" {
             settings.refreshLogin()
             window.title = "SmoothScroll 設定"
@@ -53,8 +66,13 @@ final class InterfaceDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
             window.setContentSize(view.fittingSize)
         }
         window.center()
+        showWindow()
+    }
+
+    private func showWindow() {
+        window?.deminiaturize(nil)
         NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
+        window?.makeKeyAndOrderFront(nil)
     }
 
     func windowWillClose(_ notification: Notification) { Self.finish(.closed) }

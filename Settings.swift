@@ -79,10 +79,11 @@ final class Settings: ObservableObject {
     private let defaults: UserDefaults
     private let synchronizesAcrossProcesses: Bool
     private var observer: NSObjectProtocol?
+    private var isReloadingExcluded = false
     private static let changed = Notification.Name("com.masakiaota.smooth-scroll.excludedAppsChanged")
     @Published var excluded: [String] {
         didSet {
-            guard excluded != oldValue else { return }
+            guard !isReloadingExcluded, excluded != oldValue else { return }
             defaults.set(excluded, forKey: "excludedApps")
             if synchronizesAcrossProcesses {
                 // Flush before notifying the resident process or exiting the UI.
@@ -112,7 +113,11 @@ final class Settings: ObservableObject {
     func reloadExcluded() {
         defaults.synchronize()
         let stored = defaults.stringArray(forKey: "excludedApps") ?? ["com.apple.Preview", "com.microsoft.Powerpoint"]
-        if excluded != stored { excluded = stored }
+        guard excluded != stored else { return }
+        // A received snapshot must not overwrite a newer edit in shared defaults.
+        isReloadingExcluded = true
+        defer { isReloadingExcluded = false }
+        excluded = stored
     }
 
     func initializeLogin() {

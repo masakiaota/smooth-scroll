@@ -28,7 +28,7 @@ test:
 	swiftc $(SWIFTFLAGS) $(SOURCES) -o .build/SmoothScroll-test-release
 	.build/SmoothScroll-test-release --self-test
 
-test-interface:
+test-interface: test
 	mkdir -p .build
 	swiftc $(SWIFTFLAGS) Settings.swift Interface.swift scripts/InterfaceTests.swift -o .build/InterfaceTests
 	.build/InterfaceTests

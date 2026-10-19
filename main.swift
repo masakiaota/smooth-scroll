@@ -295,7 +295,7 @@ final class SmoothScrollApplicationDelegate: NSObject, NSApplicationDelegate {
 
     private func showInterface(mode: String, failure: String? = nil) {
         if let interface, interface.isRunning {
-            NSRunningApplication(processIdentifier: interface.processIdentifier)?.activate(options: [.activateAllWindows])
+            InterfaceDelegate.requestShow(processIdentifier: interface.processIdentifier)
             return
         }
         let process = Process()
@@ -356,9 +356,12 @@ func runApplication() {
     withExtendedLifetime(delegate) { NSApplication.shared.run() }
 }
 
-if (4...5).contains(CommandLine.arguments.count), CommandLine.arguments[1] == "--interface",
-   ["settings", "permissions"].contains(CommandLine.arguments[2]),
-   let parentPID = Int32(CommandLine.arguments[3]), parentPID == getppid() {
+if CommandLine.arguments.dropFirst().first == "--interface" {
+    // A helper whose parent has already exited must never become a resident.
+    guard (4...5).contains(CommandLine.arguments.count),
+          ["settings", "permissions"].contains(CommandLine.arguments[2]),
+          let parentPID = Int32(CommandLine.arguments[3]), parentPID > 1,
+          parentPID == getppid() else { exit(InterfaceResult.closed.rawValue) }
     runInterface(mode: CommandLine.arguments[2], failure: CommandLine.arguments.count == 5 ? CommandLine.arguments[4] : nil, parentPID: parentPID)
 } else if Array(CommandLine.arguments.dropFirst()) == ["--self-test"] {
     runSelfTest()
